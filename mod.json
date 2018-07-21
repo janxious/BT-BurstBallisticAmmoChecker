@@ -1,0 +1,18 @@
+﻿{
+  "Name": "BurstBallisticAmmoChecker",
+  "Enabled": true,
+
+  "Version": "0.0.1",
+
+  "Author": "janxious",
+  "Website": "https://github.com/janxious/BT-BurstBallisticAmmoChecker",
+
+  "DLL": "BurstBallisticAmmoChecker.dll",
+  "DLLEntryPoint": "BurstBallisticAmmoChecker.Core.Init",
+  "DependsOn": [],
+  "ConflictsWith": [],
+
+  "Settings": {
+    "debug": false
+  }
+}
