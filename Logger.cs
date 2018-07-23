@@ -61,5 +61,26 @@ namespace BurstBallisticAmmoChecker
                 sb.Remove(0, sb.Length);
             }
         }
+
+        static void LogEffect(BurstBallisticEffect effect)
+        {
+            LogEffect(effect, -1);
+        }
+
+        static void LogEffect(BurstBallisticEffect effect, int index)
+        {
+            var tEffect = Traverse.Create(effect);
+            var hitIndexField = tEffect.Field("hitIndex");
+            var hitIndex = hitIndexField.GetValue<int>();
+            var sb = new StringBuilder();
+            sb.AppendLine($"hitIndex: {hitIndex}");
+            sb.AppendLine($"hitLocations: {effect.hitInfo.hitLocations.Length}");
+            sb.AppendLine($"shotsWhenFired: {effect.weapon.ShotsWhenFired}");
+            if (index >= 0)
+            {
+                sb.AppendLine($"index: {index}");
+            }
+            Logger.Debug(sb.ToString());
+        }
     }
 }
