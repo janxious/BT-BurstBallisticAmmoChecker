@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -32,32 +33,35 @@ namespace BurstBallisticAmmoChecker
                 Logger.Error(ex);
                 ModSettings = new Settings();
             }
-
+            HarmonyInstance.DEBUG = ModSettings.debug;
             var harmony = HarmonyInstance.Create(ModId);
             harmony.PatchAll(Assembly.GetExecutingAssembly());
-            HarmonyInstance.DEBUG = ModSettings.debug;
         }
     }
 
-// trying some shot delay changes
-//    [HarmonyPatch(typeof(BallisticEffect), "SetupBullets")]
-//    static class BallisticEffect_SetupBullets_ShotDelay_Patch
-//    {
-////        IL_0017: ldarg.0
-////        IL_0018: ldc.r4 0.5
-////        IL_001d: stfld float32 BallisticEffect::shotDelay
-//        static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
-//        {
-//            var instructionList = instructions.ToList();
-//            var index = instructionList.FindIndex(ins =>
-//                ins.opcode == OpCodes.Ldc_R4 && ins.operand is float f && Math.Abs(f - 0.5f) < 0.001);
-//            instructionList[index].operand = (object) 0.1f;
-//            return instructionList;
-//        }
-//    }
-
     static class TouchUp
     {
+        static void LogEffect(BurstBallisticEffect effect)
+        {
+            LogEffect(effect, -1);
+        }
+
+        static void LogEffect(BurstBallisticEffect effect, int index)
+        {
+            var tEffect = Traverse.Create(effect);
+            var hitIndexField = tEffect.Field("hitIndex");
+            var hitIndex = hitIndexField.GetValue<int>();
+            var sb = new StringBuilder();
+            sb.AppendLine($"hitIndex: {hitIndex}");
+            sb.AppendLine($"hitLocations: {effect.hitInfo.hitLocations.Length}");
+            sb.AppendLine($"shotsWhenFired: {effect.weapon.ShotsWhenFired}");
+            if (index >= 0)
+            {
+                sb.AppendLine($"index: {index}");
+            }
+            Logger.Debug(sb.ToString());
+        }
+
         static void Updater(BurstBallisticEffect effect)
         {
             if (effect.currentState != WeaponEffect.WeaponEffectState.Firing)
@@ -73,34 +77,23 @@ namespace BurstBallisticAmmoChecker
             var onImpactMethod = tEffect.Method("OnImpact", new Type[]{typeof(float)});
             var onCompleteMethod = tEffect.Method("OnComplete");
             var sb = new StringBuilder();
-            sb.AppendLine($"t: {t}");
-            sb.AppendLine($"hitIndex: {hitIndex}");
-            sb.AppendLine($"hitLocations: {effect.hitInfo.hitLocations.Length}");
-            sb.AppendLine($"shotsWhenFired: {effect.weapon.ShotsWhenFired}");
-            Logger.Debug(sb.ToString());
             if ((double) t >= (double) effect.impactTime && (double) t >= (double)nextFloatie && hitIndex < effect.hitInfo.hitLocations.Length && effect.hitInfo.hitLocations[hitIndex] != 0 && effect.hitInfo.hitLocations[hitIndex] != 65536)
             {
                 nextFloatieField.SetValue(t + floatieInterval);
-                //effect.nextFloatie = t + effect.floatieInterval;
                 playImpactMethod.GetValue();
-                //effect.PlayImpact();
             }
             if ((double) t < 1.0)
                 return;
             float hitDamage = effect.weapon.DamagePerShotAdjusted(effect.weapon.parent.occupiedDesignMask);
             for (int index = 0; index < effect.hitInfo.hitLocations.Length && index < effect.weapon.ShotsWhenFired; ++index)
             {
-                Logger.Debug($"index: {index}\nshotsWhenFired: {effect.weapon.ShotsWhenFired}\nhitlocation length: {effect.hitInfo.hitLocations.Length}");
                 if (effect.hitInfo.hitLocations[index] != 0 && effect.hitInfo.hitLocations[index] != 65536)
                 {
                     hitIndexField.SetValue(index);
-
                     onImpactMethod.GetValue(new object[] {hitDamage});
-                    //effect.OnImpact(hitDamage);
                 }
             }
             onCompleteMethod.GetValue();
-            //effect.OnComplete();
         }
 
     }
@@ -111,83 +104,87 @@ namespace BurstBallisticAmmoChecker
         static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
             var instructionList = instructions.ToList();
-            var replacerMethod = AccessTools.Method(typeof(TouchUp), "Updater", new[] {typeof(BurstBallisticEffect)});
-            var callout = new CodeInstruction(OpCodes.Callvirt, replacerMethod);
-            instructionList.RemoveRange(3, instructionList.Count - 4);
-            instructionList.Insert(3, callout);
+            // † this is dead for now. It works but doesn't play nicely †
             // we're gonna nuke the method mostly, and replace it with our own stuff
+            //var replacerMethod = AccessTools.Method(typeof(TouchUp), "Updater", new[] {typeof(BurstBallisticEffect)});
+            //var callout = new CodeInstruction(OpCodes.Callvirt, replacerMethod);
+            //instructionList.RemoveRange(3, instructionList.Count - 4);
+            //instructionList.Insert(3, callout);
+            // † † †
+
+
             // Patch check in for first check into hitindex. want to change:
             //   if ((double) this.t >= (double) this.impactTime && (double) this.t >= (double) this.nextFloatie && (this.hitInfo.hitLocations[this.hitIndex] != 0 && this.hitInfo.hitLocations[this.hitIndex] != 65536))
             // To:
-            //   if ((double) this.t >= (double) this.impactTime && (double) this.t >= (double) this.nextFloatie && (this.hitIndex < this.hitInfo.hitLocations.Length && this.hitInfo.hitLocations[this.hitIndex] != 0 && this.hitInfo.hitLocations[this.hitIndex] != 65536))
-//            var nextFloatieField = AccessTools.Field(typeof(BurstBallisticEffect), "nextFloatie");
-//            var nextFloatieIndex = instructionList.FindIndex(instruction => 
-//                instruction.opcode == OpCodes.Ldfld && instruction.operand == nextFloatieField
-//            );
-//            var instructionsToInsert = new List<CodeInstruction>();
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldarg_0));
-//            var hitIndex = AccessTools.Field(typeof(BurstBallisticEffect), "hitIndex");
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldfld, hitIndex));
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldarg_0));
-//            var hitInfo = AccessTools.Field(typeof(BurstBallisticEffect), "hitInfo");
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldflda, hitInfo));
-//            var hitLocations = AccessTools.Field(typeof(WeaponHitInfo), "hitLocations");
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldfld, hitLocations));
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldlen));
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Conv_I4));
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Blt_Un, instructionList[nextFloatieIndex + 1].operand));
-//            instructionList.InsertRange(nextFloatieIndex + 2, instructionsToInsert);
+            //   if ((double) this.t >= (double) this.impactTime && (double) this.t >= (double) this.nextFloatie && this.hitIndex < this.hitInfo.hitLocations.Length && this.hitInfo.hitLocations[this.hitIndex] != 0 && this.hitInfo.hitLocations[this.hitIndex] != 65536)
+            var instructionsToInsert = new List<CodeInstruction>();
+
+            var logMethod = AccessTools.Method(typeof(TouchUp), "LogEffect", new[] {typeof(BurstBallisticEffect)});
+            var logout = new CodeInstruction(OpCodes.Call, logMethod);
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldarg_0));
+            instructionsToInsert.Add(logout);
+
+            var hitIndex = AccessTools.Field(typeof(BurstBallisticEffect), "hitIndex");
+            var hitInfo = AccessTools.Field(typeof(BurstBallisticEffect), "hitInfo");
+            var hitLocations = AccessTools.Field(typeof(WeaponHitInfo), "hitLocations");
+            var jumpLabelIndex = instructionList.FindIndex(instruction => instruction.opcode == OpCodes.Ldc_R4) - 2;
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldarg_0));                                          // this
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldfld, hitIndex));                                  // this.hitIndex
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldarg_0));                                          // this
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldflda, hitInfo));                                  // this.hitInfo
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldfld, hitLocations));                              // this.hitInfo.hitLocations
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldlen));                                            // this.hitInfo.hitLocations.Length
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Conv_I4));                                          // convert to int32
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Bge_S, instructionList[jumpLabelIndex].labels[0])); // hitIndex >= length -> goto point after conditional code 
+
+            var nextFloatieField = AccessTools.Field(typeof(BurstBallisticEffect), "nextFloatie");
+            var nextFloatieIndex = instructionList.FindIndex(instruction => 
+                instruction.opcode == OpCodes.Ldfld && instruction.operand == nextFloatieField
+            );
+            instructionList.InsertRange(nextFloatieIndex + 2, instructionsToInsert);
 
             // then patch the for loop check in. I want to change:
             //   for (int index = 0; index < this.weapon.ShotsWhenFired; ++index)
             // To:
             //   for (int index = 0; index < this.hitInfo.hitLocations.Length && index < this.weapon.ShotsWhenFired; ++index)
+            var damagePerShotAdjustedMethod = AccessTools.Method(
+                typeof(Weapon), 
+                "DamagePerShotAdjusted",
+                new Type[] {typeof(DesignMaskDef)}
+            );
+            var damagePerShotAdjustedIndex = instructionList.FindIndex(instruction =>
+                instruction.opcode == OpCodes.Callvirt && instruction.operand == damagePerShotAdjustedMethod
+            );
+            var retIndex = instructionList.FindIndex(instruction => instruction.opcode == OpCodes.Ret);
+            var labelToJumpTo = new Label();
+            instructionList[retIndex - 2].labels.Add(labelToJumpTo);
+            
 
-            //FileLog.Log($"length before: {instructionList.Count}");
-//            var damagePerShotAdjustedMethod = AccessTools.Method(typeof(Weapon), 
-//                "DamagePerShotAdjusted",
-//                new Type[] {typeof(DesignMaskDef)});
-//            //FileLog.Log($"found dpsam? {damagePerShotAdjustedMethod != null}");
-//            var damagePerShotAdjustedIndex = instructionList.FindIndex(instruction =>
-//                instruction.opcode == OpCodes.Callvirt && instruction.operand == damagePerShotAdjustedMethod
-//            );
-//            //FileLog.Log($"index: {damagePerShotAdjustedIndex}");
-//            var jumpLabel = instructionList[damagePerShotAdjustedIndex + 5].labels[0];
-//            //FileLog.Log($"label: {jumpLabel}");
-//            var shotWhenFiredMethod = AccessTools.Method(typeof(Weapon), "get_ShotsWhenFired", new Type[] {});
-//            //FileLog.Log($"found swfm? {shotWhenFiredMethod != null}");
-//            var shotsWhenFiredIndex = instructionList.FindIndex(instruction =>
-//                instruction.opcode == OpCodes.Callvirt && instruction.operand == shotWhenFiredMethod
-//            );
-            //FileLog.Log($"index: {shotsWhenFiredIndex}");
-//            instructionsToInsert.Clear();
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldloc_1));
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldarg_0));
-//            //var hitInfo = AccessTools.Field(typeof(BurstBallisticEffect), "hitInfo");
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldflda, hitInfo));
-//            //var hitLocations = AccessTools.Field(typeof(WeaponHitInfo), "hitLocations");
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldfld, hitLocations));
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldlen));
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Conv_I4));
-//            instructionsToInsert.Add(new CodeInstruction(OpCodes.Blt, jumpLabel));
-            //FileLog.Log("okay?");
-            //instructionList.InsertRange(shotsWhenFiredIndex + 2, instructionsToInsert);
-            //FileLog.Log("still okay?");
-            //FileLog.Log($"length after: {instructionList.Count}");
+            instructionsToInsert.Clear();
 
-            StringBuilder sb = new StringBuilder();
-//            Logger.ListTheStack(sb, instructionList);
-//            Logger.LogStringBuilder(sb);
-            FileLog.Log("flush force");
+            logMethod = AccessTools.Method(typeof(TouchUp), "LogEffect", new[] {typeof(BurstBallisticEffect), typeof(int)});
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldarg_0));
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldloc_1));
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Call, logMethod));
+
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldloc_1));              // loop index variable
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldarg_0));              // "this"
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldflda, hitInfo));      // "this.hitInfo
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldfld, hitLocations));  // this.hitInfo.hitLocations
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldlen));                // this.hitInfo.hitLocations.Length
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Conv_I4));              // convert to int32
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Bge_S, labelToJumpTo)); // i >= length -> goto label for completing method
+            instructionsToInsert.Add(new CodeInstruction(OpCodes.Ldloc_1));              // replicate the single code we nuked in the nop below
+
+            var shotWhenFiredMethod = AccessTools.Method(typeof(Weapon), "get_ShotsWhenFired", new Type[] {});
+            var shotsWhenFiredIndex = instructionList.FindIndex(instruction =>
+                instruction.opcode == OpCodes.Callvirt && instruction.operand == shotWhenFiredMethod
+            );
+            var labelPreservationIndex = shotsWhenFiredIndex - 3;
+            Trace.Assert(instructionList[labelPreservationIndex].opcode == OpCodes.Ldloc_1);
+            instructionList[labelPreservationIndex].opcode = OpCodes.Nop;
+            instructionList.InsertRange(shotsWhenFiredIndex - 2, instructionsToInsert);
             return instructionList;
         }
-
-//        private static bool logged = false;
-//        static void Postfix()
-//        {
-//            if (logged) return;
-//            logged = true; 
-//            Logger.Debug("we did it!");
-//        }
     }
 }
