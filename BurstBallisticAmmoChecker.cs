@@ -36,11 +36,6 @@ namespace BurstBallisticAmmoChecker
         }
     }
 
-    static class TouchUp
-    {
-        
-    }
-
     [HarmonyPatch(typeof(BurstBallisticEffect), "Update")]
     static class BurstBallistic_IL_Patcheroo
     {
